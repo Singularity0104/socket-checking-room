@@ -14,7 +14,7 @@ def connect(name, conn):
     while True:
         data = conn.recv(1024)
         decode_data = json.loads(data)
-        if decode_data["type"] == "quit":
+        if decode_data["type"] == "quit_re":
             print("\033[1;33m%s\033[0m \033[1;31mquit the chatting room at\033[0m \033[1;36m%s\033[0m\n" % (decode_data["name"], decode_data["time"]))
             send_quit_ok = sendmeg.create_send_msg_byte("server", type="quit_ok")
             conn.send(send_quit_ok)

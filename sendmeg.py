@@ -5,10 +5,14 @@ from datetime import datetime
 def create_send_msg_byte(
     name,
     type="meg",
-    msg="NULL"
+    msg="NULL",
+    time="NULL"
     ):
     curr_time = datetime.now()
-    time_str = datetime.strftime(curr_time, '%Y-%m-%d %H:%M:%S')
+    if (time == "NULL"):
+        time_str = datetime.strftime(curr_time, '%Y-%m-%d %H:%M:%S')
+    else:
+        time_str = time
     send_mag = {
         "name": name,
         "time": time_str,
