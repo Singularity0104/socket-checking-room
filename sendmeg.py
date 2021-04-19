@@ -1,4 +1,4 @@
-
+import struct
 import json
 from datetime import datetime
 
@@ -20,4 +20,6 @@ def create_send_msg_byte(
         "message": msg
     }
     send_mag_byte = bytes(json.dumps(send_mag).encode('utf-8'))
-    return send_mag_byte
+    length = len(send_mag_byte)
+    header = struct.pack("!1I", length)
+    return header + send_mag_byte
