@@ -8,7 +8,7 @@ import time
 import queue
 import struct
 
-workerThreadNum = 4
+workerThreadNum = 16
 inputs = {}
 outputs = {}
 dataBuffer = {}
@@ -66,16 +66,20 @@ def connect(data, name, conn, workerId):
     try:
         decode_data = json.loads(data)
         if decode_data["type"] == "quit_re":
-            print("\033[1;33m%s\033[0m \033[1;31mquit the chatting room at\033[0m \033[1;36m%s\033[0m\n" % (name, decode_data["time"]))
-            send_quit_ok = sendmeg.create_send_msg_byte("server", type="quit_ok")
-            conn.send(send_quit_ok)
-            remove_conn(name, conn, workerId)
-            send_quit = sendmeg.create_send_msg_byte("server", type="quit_inf", msg=name, time=decode_data["time"])
-            for c in all_client:
-                c.send(send_quit)
+            if decode_data["name"] == "test":
+                print("\033[1;32mtest end\033[0m \033[1;36m%s\033[0m\n" % (decode_data["time"]))
+            else:
+                print("\033[1;33m%s\033[0m \033[1;31mquit the chatting room at\033[0m \033[1;36m%s\033[0m\n" % (name, decode_data["time"]))
+                send_quit_ok = sendmeg.create_send_msg_byte("server", type="quit_ok")
+                conn.send(send_quit_ok)
+                remove_conn(name, conn, workerId)
+                send_quit = sendmeg.create_send_msg_byte("server", type="quit_inf", msg=name, time=decode_data["time"])
+                for c in all_client:
+                    c.send(send_quit)
         elif decode_data["type"] == "ping":
             # print(name, "ping ok!")
             ping_list[conn] = datetime.now()
+            conn.send(sendmeg.create_send_msg_byte("server", type="pong"))
         elif decode_data["type"] == "sendfile":
             dest = decode_data["name"]
             filename = decode_data["message"]
@@ -164,12 +168,22 @@ if __name__ == "__main__":
     ping_checker.start()
 
     index = 0
+    test_num = 0
     while True:
         conn, addr = server.accept()
         data = conn.recv(1024)
         conn.setblocking(0)
         decode_data = json.loads(data[4:])
-        if decode_data["name"] in all_name_list:
+        if decode_data["name"] == "test":
+            send_join_ok = sendmeg.create_send_msg_byte("server", type="join_ok")
+            conn.send(send_join_ok)
+            print("\033[1;32mtest %d begin\033[0m \033[1;36m%s\033[0m\n" % (test_num, decode_data["time"]))
+            workerId = index % workerThreadNum
+            name = "test" + str(test_num)
+            join_conn(name, conn, workerId)
+            index = index + 1
+            test_num = test_num + 1
+        elif decode_data["name"] in all_name_list:
             send_join_failed = sendmeg.create_send_msg_byte("server", type="join_f")
             conn.send(send_join_failed)
             conn.close()
