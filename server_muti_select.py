@@ -9,6 +9,8 @@ import struct
 import os
 
 workerThreadNum = 8
+
+# 所需数据结构
 inputs = {}
 outputs = {}
 dataBuffer = {}
@@ -25,6 +27,7 @@ server = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 server.bind(('localhost',6999))
 server.listen(5)
 
+# 用户加入聊天室的初始化工作
 def join_conn(name, conn, workerId):
     all_client.append(conn)
     inputs[workerId].append(conn)
@@ -35,6 +38,7 @@ def join_conn(name, conn, workerId):
     ping_list[conn] = datetime.now()
     map_name[name] = conn
 
+# 用户退出聊天室的收尾工作
 def remove_conn(name, conn, workerId):
     all_client.remove(conn)
     inputs[workerId].remove(conn)
@@ -48,19 +52,18 @@ def remove_conn(name, conn, workerId):
     map_name.pop(name)
     conn.close()
 
-
+# 心跳检测
 def check_ping():
     while True:
         try:
             for c in ping_list:
                 if (datetime.now() - ping_list[c]).seconds > 3:
                     print("loss ping!")
-                    # remove_conn(all_name[c], c, all_id[c])
-            # print("check ok!")
         except:
             pass
         time.sleep(0.05)
     
+# 发送文件的函数
 def sendfile(name, conn, filename, filepath):
     time.sleep(0.5)
     print("send begin")
@@ -68,7 +71,7 @@ def sendfile(name, conn, filename, filepath):
         fp = open(filepath, 'rb')
         b = 0
         while True:
-            time.sleep(0.001)
+            time.sleep(0.0001)
             data = fp.read(512)
             if not data:
                 fp.close()
@@ -76,17 +79,16 @@ def sendfile(name, conn, filename, filepath):
                 break
             send_data = sendmeg.create_send_msg_byte(filename, type="fileblock", msg=data)
             print(filename, "block", b)
-            # send_data = sendmeg.create_send_msg_byte(dest, type="fileblock", msg=data.decode())
             conn.send(send_data)
             b += 1
     enddata = sendmeg.create_send_msg_byte(filename, type="fileblockover")
     conn.send(enddata)
     return
                 
-
+# 处理来自客户端的数据包
 def connect(data, name, conn, workerId):
-    # data = conn.recv(1024)
     try:
+        # 解包，以下条件语句分别判断包的种类，按情况处理
         decode_data = eval(data)
         if decode_data["type"] == "quit_re":
             if decode_data["name"] == "test":
@@ -140,20 +142,17 @@ def connect(data, name, conn, workerId):
     except:
         pass
 
-            
+# 多进程多路复用IO，每个进程的工作函数
 def workerThread(workerId):
     while True:
-        # print("in")
         time.sleep(0.001)
         while(len(inputs[workerId]) + len(outputs[workerId])) <= 0:
             time.sleep(0.5)
+        # 多路复用IO
         r_list, w_list, e_list = select.select(inputs[workerId], outputs[workerId], inputs[workerId], 100)
-        # print(r_list)
-        # print(w_list)
-        # print(e_list)
         for obj in r_list:
             data = obj.recv(2048)
-            # print(data)
+            # 连接出现异常
             if len(data) == 0:
                 name = all_name[obj]
                 print("\033[1;31msomething wrong with\033[0m \033[1;33m%s\033[0m \033[1;31mat\033[0m \033[1;36m%s\033[0m\n" % (name, datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')))
@@ -161,19 +160,15 @@ def workerThread(workerId):
                 send_quit = sendmeg.create_send_msg_byte("server", type="quit_acc", msg=name)
                 for c in all_client:
                     c.send(send_quit)
+            # 收数据正常，加入缓冲区
             else:
                 dataBuffer[obj] += data
                 if obj not in outputs[workerId]:
                     outputs[workerId].append(obj)
         for w_obj in w_list:
-            # try:
-            #     while not dataBuffer[w_obj].empty():
-            #         t_data = dataBuffer[w_obj].get()
-            #         connect(t_data,all_name[obj], w_obj, workerId)
-            #     outputs[workerId].remove(w_obj)
-            # except:
-            #     pass
             try:
+                # 防止粘包和不完整包
+                # 循环处理缓冲区中的数据
                 while len(dataBuffer[w_obj]) > 4:
                     length = struct.unpack('!1I', dataBuffer[w_obj][:4])
                     if len(dataBuffer[w_obj]) < 4 + length[0]:
@@ -181,8 +176,6 @@ def workerThread(workerId):
                         break
                     body = dataBuffer[w_obj][4: 4 + length[0]]
                     connect(body,all_name[w_obj], w_obj, workerId)
-
-                    # 获取下一个数据包，类似于把数据pop出去
                     dataBuffer[w_obj] = dataBuffer[w_obj][4 + length[0]:]
             except:
                 pass
@@ -190,19 +183,23 @@ def workerThread(workerId):
             print(e_obj, "ERROR!")
 
 if __name__ == "__main__":
+    # 初始化监听进程
     for i in range(0,workerThreadNum):
         inputs[i] = []
         outputs[i] = []
         worker = threading.Thread(target=workerThread, args=(i,))
         worker.start()
 
+    # 初始化socket
     server = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
     server.bind(('localhost',6999))
     server.listen(5)
 
+    # 初始化心跳检测进程
     ping_checker = threading.Thread(target=check_ping)
     ping_checker.start()
 
+    # 主进程循环等待用户连接
     index = 0
     test_num = 0
     while True:
