@@ -1,14 +1,14 @@
 import socket
 import threading
-import json
 from datetime import datetime
 import sendmeg
 import select
 import time
 import queue
 import struct
+import os
 
-workerThreadNum = 16
+workerThreadNum = 8
 inputs = {}
 outputs = {}
 dataBuffer = {}
@@ -18,6 +18,7 @@ all_name_list = []
 all_client = []
 ping_list = {}
 map_name = {}
+file_fp = {}
 
 server = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 # server.bind(('192.168.43.122',6999))
@@ -58,13 +59,35 @@ def check_ping():
             # print("check ok!")
         except:
             pass
-        time.sleep(0.5)
+        time.sleep(0.05)
+    
+def sendfile(name, conn, filename, filepath):
+    time.sleep(0.5)
+    print("send begin")
+    if os.path.isfile(filepath):
+        fp = open(filepath, 'rb')
+        b = 0
+        while True:
+            time.sleep(0.001)
+            data = fp.read(512)
+            if not data:
+                fp.close()
+                print ('{0} file send over...'.format(os.path.basename(filepath)))
+                break
+            send_data = sendmeg.create_send_msg_byte(filename, type="fileblock", msg=data)
+            print(filename, "block", b)
+            # send_data = sendmeg.create_send_msg_byte(dest, type="fileblock", msg=data.decode())
+            conn.send(send_data)
+            b += 1
+    enddata = sendmeg.create_send_msg_byte(filename, type="fileblockover")
+    conn.send(enddata)
+    return
                 
 
 def connect(data, name, conn, workerId):
     # data = conn.recv(1024)
     try:
-        decode_data = json.loads(data)
+        decode_data = eval(data)
         if decode_data["type"] == "quit_re":
             if decode_data["name"] == "test":
                 print("\033[1;32mtest end\033[0m \033[1;36m%s\033[0m\n" % (decode_data["time"]))
@@ -80,21 +103,34 @@ def connect(data, name, conn, workerId):
             # print(name, "ping ok!")
             ping_list[conn] = datetime.now()
             conn.send(sendmeg.create_send_msg_byte("server", type="pong"))
-        elif decode_data["type"] == "sendfile":
-            dest = decode_data["name"]
+        elif decode_data["type"] == "upload":
             filename = decode_data["message"]
-            print(name, "want to send", filename, "to", dest)
-            if dest in all_name_list:
-                print(name, "send to", dest)
-                send_ok = sendmeg.create_send_msg_byte("server", type="sendfileok", msg=dest)
-                conn.send(send_ok)
-                send_rece = sendmeg.create_send_msg_byte("server", type="receivefile", msg=filename)
-                map_name[dest].send(send_rece)
+            print(name, "want to upload", filename)
+            fp = open('./serverfile/' + filename, 'wb')
+            file_fp[filename] = fp
+            print(fp)
+            print(file_fp[filename])
+            conn.send(sendmeg.create_send_msg_byte("server", type="uploadok", msg=filename))
+            print ('start receiving...', filename)
+        elif decode_data["type"] == "download":
+            filename = decode_data["message"]
+            filepath = "./serverfile/" + filename
+            print(name, "want to download", filename)
+            s = threading.Thread(target=sendfile, args=("server", conn, filename, filepath))
+            s.start()
+        elif decode_data["type"] == "ls":
+            conn.send(sendmeg.create_send_msg_byte("server", type="allfile", msg=(os.listdir("./serverfile"))))
         elif decode_data["type"] == "fileblock":
-            dest = decode_data["name"]
-            length = len(data)
-            header = struct.pack("!1I", length)
-            map_name[dest].send(header + data)
+            filename = decode_data["name"]
+            print(filename, "block")
+            file_block = decode_data["message"]
+            file_fp[filename].write(file_block)
+        elif decode_data["type"] == "fileblockover":
+            filename = decode_data["name"]
+            file_fp[filename].close()
+            print(filename, "end receive...")
+            for c in all_client:
+                c.send(sendmeg.create_send_msg_byte(name, type="newfile", msg=filename))
         else:
             print("\033[1;36m%s\033[0m\n\033[1;33m%s: \033[0m%s\n" % (decode_data["time"], name, decode_data["message"]))
             length = len(data)
@@ -116,7 +152,7 @@ def workerThread(workerId):
         # print(w_list)
         # print(e_list)
         for obj in r_list:
-            data = obj.recv(1024)
+            data = obj.recv(2048)
             # print(data)
             if len(data) == 0:
                 name = all_name[obj]
@@ -173,7 +209,7 @@ if __name__ == "__main__":
         conn, addr = server.accept()
         data = conn.recv(1024)
         conn.setblocking(0)
-        decode_data = json.loads(data[4:])
+        decode_data = eval(data[4:])
         if decode_data["name"] == "test":
             send_join_ok = sendmeg.create_send_msg_byte("server", type="join_ok")
             conn.send(send_join_ok)

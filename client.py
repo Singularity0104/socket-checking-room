@@ -1,5 +1,4 @@
 import socket
-import json
 import threading
 from datetime import datetime
 import sendmeg
@@ -12,6 +11,7 @@ import os
 quit = False
 
 sendfile_thread = {}
+file_fp = {}
 
 def ping(name, client):
     while True:
@@ -26,21 +26,26 @@ def ping(name, client):
         else:
             return
 
-def sendfile(name, client, dest, filepath):
-    print("send begin")
-    sendfile_thread.pop(dest)
+def sendfile(name, client, filename, filepath):
+    time.sleep(0.5)
+    print("\033[1;32m%s uploading...\033[0m" % (filename))
+    sendfile_thread.pop(filename)
     if os.path.isfile(filepath):
         fp = open(filepath, 'rb')
+        b = 0
         while True:
-            print("block")
+            time.sleep(0.001)
             data = fp.read(512)
             if not data:
-                print ('{0} file send over...'.format(os.path.basename(filepath)))
+                fp.close()
+                print ("\033[1;32m%s uploaded successfully!\033[0m" % (filename))
                 break
-            send_data = sendmeg.create_send_msg_byte(dest, type="fileblock", msg=data.decode())
+            send_data = sendmeg.create_send_msg_byte(filename, type="fileblock", msg=data)
+            # print(filename, "block", b)
+            # send_data = sendmeg.create_send_msg_byte(dest, type="fileblock", msg=data.decode())
             client.send(send_data)
-            time.sleep(0.01)
-    enddata = sendmeg.create_send_msg_byte(dest, type="fileblock")
+            b += 1
+    enddata = sendmeg.create_send_msg_byte(filename, type="fileblockover")
     client.send(enddata)
     return
 
@@ -54,14 +59,30 @@ def send(name, client):
             send_mag_byte = sendmeg.create_send_msg_byte(name, type="quit_re")
             client.send(send_mag_byte)
             return
-        elif msg == "sendfile":
-            dest = input("please input the destination: ")
-            filepath = input("please input the filename: ")
-            filename = os.path.basename(filepath)
-            send_msg = sendmeg.create_send_msg_byte(dest, type="sendfile", msg=filename)
+        elif msg == ":ud":
+            filepath = input("\033[1;32mPlease input the filepath: \033[0m")
+            if os.path.exists(filepath):
+                filename = os.path.basename(filepath)
+                send_msg = sendmeg.create_send_msg_byte(name, type="upload", msg=filename)
+                client.send(send_msg)
+                s = threading.Thread(target=sendfile, args=(name, client, filename, filepath))
+                sendfile_thread[filename] = s
+            else:
+                print("\033[1;31mFile not exists!\033[0m")
+        elif msg == ":dd":
+            filename = input("\033[1;32mPlease input the filename: \033[0m")
+            filepath = input("\033[1;32mPlease input the download path: \033[0m")
+            if filepath[-1] != "/":
+                filepath = filepath + "/"
+            if not os.path.exists(filepath):
+                os.makedirs(filepath)
+            send_msg = sendmeg.create_send_msg_byte(name, type="download", msg=filename)
             client.send(send_msg)
-            s = threading.Thread(target=sendfile, args=(name, client, dest, filepath))
-            sendfile_thread[dest] = s
+            fp = open(filepath + filename, 'wb')
+            file_fp[filename] = fp
+            print("\033[1;32m%s downloading...\033[0m" % (filename))
+        elif msg == ":ls":
+            client.send(sendmeg.create_send_msg_byte(name, type="ls"))
         else:
             send_msg_byte = sendmeg.create_send_msg_byte(name, msg=msg)
             client.send(send_msg_byte)
@@ -69,7 +90,7 @@ def send(name, client):
 def receive(name, client):
     dataBuffer = bytes()
     while True:
-        data = client.recv(1024)
+        data = client.recv(2048)
         if len(data) == 0:
                 print("\033[1;31msomething wrong with\033[0m \033[1;33mserver\033[0m \033[1;31mat\033[0m \033[1;36m%s\033[0m\n" % (datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')))
                 client.close()
@@ -80,42 +101,43 @@ def receive(name, client):
         while len(dataBuffer) > 4:
             length = struct.unpack('!1I', dataBuffer[:4])
             if len(dataBuffer) < 4 + length[0]:
-                print("continue receive")
+                # print("continue receive")
                 break
             body = dataBuffer[4: 4 + length[0]]
             try:
-                decode_data = json.loads(body)
+                decode_data = eval(body)
                 if decode_data["type"] == "quit_ok":
-                    print("\033[1;31mquit successfully!\033[0m")
+                    print("\033[1;31mQuit successfully!\033[0m")
                     quit = True
                     return
+                elif decode_data["type"] == "pong":
+                    pass
                 elif decode_data["type"] == "join_inf":
                     print("\033[1;33m%s\033[0m \033[1;32mjoin the chatting room at\033[0m \033[1;36m%s\033[0m\n" % (decode_data["message"], decode_data["time"]))
                 elif decode_data["type"] == "quit_inf":
                     print("\033[1;33m%s\033[0m \033[1;31mquit the chatting room at\033[0m \033[1;36m%s\033[0m\n" % (decode_data["message"], decode_data["time"]))
                 elif decode_data["type"] == "quit_acc":
                     print("\033[1;31msomething wrong with\033[0m \033[1;33m%s\033[0m \033[1;31mat\033[0m \033[1;36m%s\033[0m\n" % (decode_data["message"], decode_data["time"]))
-                elif decode_data["type"] == "sendfileok":
-                    print("ready")
-                    dest = decode_data["message"]
-                    if dest in sendfile_thread:
-                        sendfile_thread[dest].start()
-                elif decode_data["type"] == "receivefile":
+                elif decode_data["type"] == "newfile":
+                    print("\033[1;33m%s\033[0m \033[1;32mupload %s at\033[0m \033[1;36m%s\033[0m\n" % (decode_data["name"], decode_data["message"], decode_data["time"]))
+                elif decode_data["type"] == "uploadok":
+                    # print("ready")
                     filename = decode_data["message"]
-                    fp = open('./' + filename, 'wb')
-                    print ('start receiving...')
-                    while True:
-                            block = client.recv(1024)
-                            decode_block = json.loads(block[4:])
-                            if decode_block["type"] != "fileblock":
-                                continue
-                            elif decode_block["message"] == "NULL":
-                                break
-                            else:
-                                file_block = decode_block["message"]
-                                fp.write(file_block.encode())
-                    fp.close()
-                    print ('end receive...')
+                    if filename in sendfile_thread:
+                        sendfile_thread[filename].start()
+                elif decode_data["type"] == "fileblock":
+                    # print("block")
+                    filename = decode_data["name"]
+                    file_block = decode_data["message"]
+                    file_fp[filename].write(file_block)
+                elif decode_data["type"] == "fileblockover":
+                    filename = decode_data["name"]
+                    file_fp[filename].close()
+                    print ("\033[1;32m%s downloaded successfully!\033[0m" % (filename))
+                elif decode_data["type"] == "allfile":
+                    print("\033[1;32mAll file in the server:\033[0m")
+                    for f in decode_data["message"]:
+                        print(f)
                 else:
                     print("\033[1;36m%s\033[0m\n\033[1;33m%s: \033[0m%s\n" % (decode_data["time"], decode_data["name"], decode_data["message"]))
             except:
@@ -128,9 +150,9 @@ def exit_me(signum, frame):
     send_mag_byte = sendmeg.create_send_msg_byte(name, type="quit_re")
     client.send(send_mag_byte)
     data = client.recv(1024)
-    decode_data = json.loads(data[4:])
+    decode_data = eval(data[4:])
     if decode_data["type"] == "quit_ok":
-        print("\033[1;31mquit successfully!\033[0m")
+        print("\033[1;31mQuit successfully!\033[0m")
         # global quit
         # quit = True
     time.sleep(1)
@@ -139,18 +161,19 @@ def exit_me(signum, frame):
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, exit_me)
     signal.signal(signal.SIGTERM, exit_me)
-    name = input("Please input your name: ")
+    name = input("\033[1;32mPlease input your name: \033[0m")
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client.connect(('localhost', 6999))
     send_name = sendmeg.create_send_msg_byte(name)
     client.send(send_name)
     data = client.recv(1024)
-    decode_data = json.loads(data[4:])
+    decode_data = eval(data[4:])
     if decode_data["type"] == "join_f":
-        print("join failed!")
+        print("\033[1;31mJoin failed!\033[0m")
         socket.SHUT_RDWR
         client.close()
     else:
+        print("\033[1;32mJoin successfully!\033[0m")
         t1 = threading.Thread(target=send, args=(name, client))
         t2 = threading.Thread(target=receive, args=(name, client))
         t3 = threading.Thread(target=ping, args=(name, client))
