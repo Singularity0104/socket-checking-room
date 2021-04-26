@@ -22,6 +22,7 @@ def ping(name, client):
         if not quit:
             try:
                 client.send(send_ping_byte)
+                # 心跳包演示
                 time.sleep(1)
                 # print("ping")
             except:
@@ -38,7 +39,7 @@ def sendfile(name, client, filename, filepath):
         fp = open(filepath, 'rb')
         b = 0
         while True:
-            time.sleep(0.0001)
+            time.sleep(0.001)
             data = fp.read(512)
             if not data:
                 fp.close()

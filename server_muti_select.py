@@ -71,7 +71,7 @@ def sendfile(name, conn, filename, filepath):
         fp = open(filepath, 'rb')
         b = 0
         while True:
-            time.sleep(0.0001)
+            time.sleep(0.001)
             data = fp.read(512)
             if not data:
                 fp.close()
